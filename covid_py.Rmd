@@ -1,0 +1,32 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(reticulate)
+```
+
+
+```{python}
+import requests
+import pandas as pd
+import numpy as np
+
+#url="https://www.ecdc.europa.eu/sites/default/files/documents/COVID-19-geographic-disbtribution-worldwide.xl
+  
+```
+
+```{r}
+#View(py$seq_df)
+#View(py$df)
+View(py$df,"df1")
+
+```
+
+```{r}
+#View(py$seq_df)
+#View(py$df)
+View(py$df,"df")
+
+```

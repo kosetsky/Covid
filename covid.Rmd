@@ -1,0 +1,669 @@
+---
+title: "Поширення епідемії COVID-19 в різних країнах"
+output: html_notebook
+editor_options: 
+chunk_output_type: inline
+---
+
+
+
+ 
+```{r eval=FALSE, include=FALSE}
+
+library(tidyverse)
+library(lubridate)
+library(plotly)
+library(RColorBrewer)
+library(readxl)
+library(httr)
+library(scales)
+
+
+```
+
+
+
+```{r include=FALSE}
+
+#url <- paste("https://www.ecdc.europa.eu/sites/default/files/documents/COVID-19-geographic-disbtribution-worldwide-",format(Sys.time(), "%Y-%m-%d"), ".xlsx", sep = "")
+
+url<-"https://www.ecdc.europa.eu/sites/default/files/documents/COVID-19-geographic-disbtribution-worldwide.xlsx"
+
+GET(url, authenticate(":", ":", type="ntlm"), write_disk(tf <- tempfile(fileext = ".xlsx")))
+
+#crn <- read_excel("D:\\Downloads\\COVID-19-geographic-disbtribution-worldwide-2020-03-22.xlsx") %>%
+crn <- read_excel(tf) %>% rename(date=dateRep,Country=7,Infected_new=cases,Deaths_new=deaths) %>%
+  mutate(date=as.Date(date)-1,
+         Deaths_new=ifelse(Country=="France"&date=="2020-04-03",1120,Deaths_new),
+         Deaths_new=ifelse(Country=="France"&date=="2020-04-02",1355,Deaths_new),
+         Country=str_replace_all(Country,"_"," "),
+         Country=str_replace(Country,"United States of America|United_States_of_America","US"),
+         Country=str_replace(Country,"CANADA","Canada"),
+         Country=str_replace(Country,"United Kingdom|United kingdom|United_Kingdom","UK"),
+         Country=str_replace(Country,"switzerland","Switzerland"),
+         date=if_else(Country %in% c("Spain"), date-days(1),date),
+         europe=geoId %in% c(
+        'AL', 'AD', 'AM', 'AT', 'BY', 'BE', 'BA', 'BG', 'CH', 'CY', 'CZ', 'DE',
+        'DK', 'EE', 'ES', 'FO', 'FI', 'FR', 'GB', 'GE', 'GI', 'GR', 'HU', 'HR',
+        'IE', 'IS', 'IT', 'LI', 'LT', 'LU', 'LV', 'MC', 'MK', 'MT', 'NO', 'NL', 'PL',
+        'PT', 'RO', 'RU', 'SE', 'SI', 'SK', 'SM', 'TR', 'UA', 'VA'
+    )
+         #Country=str_replace(Country,"Czech republic|Czech_Republic","Czech Republic"),
+         ) %>%
+  arrange(Country,date) %>%
+  filter(Infected_new>0) %>% 
+  group_by(Country) %>%
+  complete(date=seq.Date(as.Date("2019-12-30"),Sys.Date()-1,by="day")) %>% 
+
+  mutate(Infected=cumsum(ifelse(is.na(Infected_new),0,Infected_new)),
+         Deaths=cumsum(ifelse(is.na(Deaths_new),0,Deaths_new)),
+         geoId=max(geoId)
+         ) %>%
+  ungroup() %>%
+  filter(!str_detect(Country,"international")) %>%
+    mutate(Infected=ifelse(Country=="Italy"&date=="2020-03-14",21157,Infected),
+           Deaths=ifelse(Country=="Italy"&date=="2020-03-14",1441,Deaths),
+           Infected=ifelse(Country=="Norway"&date=="2020-03-13",800,Infected),
+           Infected=ifelse(Country=="Switzerland"&date=="2020-03-16",2353,Infected),
+           Deaths=ifelse(Country=="Switzerland"&date=="2020-03-16",15,Deaths),
+           Deaths=ifelse(Country=="US"&date=="2020-03-19",200,Deaths),
+           #Infected=ifelse(Country=="Germany"&date==as.character(Sys.Date()-1),79696,Infected),
+           #Deaths=ifelse(Country=="Germany"&date==as.character(Sys.Date()-1),1017,Deaths),
+           #Infected=ifelse(Country=="Italy"&date==as.character(Sys.Date()-1),124632,Infected),
+           #Deaths=ifelse(Country=="Italy"&date==as.character(Sys.Date()-1),15362,Deaths),
+           Infected=ifelse(Country=="Spain"&date==as.character(Sys.Date()-1),204178,Infected),
+           Deaths=ifelse(Country=="Spain"&date==as.character(Sys.Date()-1),21282,Deaths),
+           #Infected=ifelse(Country=="France"&date==as.character(Sys.Date()-1),68605,Infected),
+           #Deaths=ifelse(Country=="France"&date==as.character(Sys.Date()-1),7560,Deaths),
+           Deaths_new = ifelse(is.na(Deaths_new)|Deaths_new==0,Deaths-lag(Deaths),Deaths_new)
+
+) %>%
+  mutate(Deaths_pc=Deaths*1000000/popData2018)
+
+
+
+
+
+#https://www.mscbs.gob.es/profesionales/saludPublica/ccayes/alertasActual/nCov-China/documentos/Actualizacion_55_COVID-19.pdf
+crn2 %>% filter(Country=="US") %>% arrange(desc(date)) %>% View()
+crn %>% filter(Country=="France") %>% arrange(desc(date)) %>% View()
+crn %>% filter(Country=="Spain") %>% arrange(desc(date)) %>% View()
+crn %>% filter(Country=="Germany") %>% arrange(desc(date)) %>% View()
+crn %>% filter(Country=="Italy") %>% arrange(desc(date)) %>% View()
+crn %>% filter(Country=="Switzerland") %>% arrange(desc(date)) %>% View()
+
+
+#crn %>% group_by(GeoId) %>% summarise(n=length(unique(Country))) %>% View()
+
+
+```
+
+
+```{r include=FALSE}
+
+start_i<-100
+start_d<-5
+
+crn1<-crn %>% 
+      filter(!Country %in% c("Others","China","Iran")) %>%
+  filter(Infected>start_i) %>%
+  group_by(Country) %>%
+  mutate(ord=1:n(),
+         total=max(Infected),
+         totalD=max(Deaths),
+         n=n(),
+         death_rate=Deaths) %>%
+    ungroup()
+
+crn2<-crn %>% 
+  filter(Deaths>start_d) %>%
+  filter(!Country %in% c("Others","China","Iran")) %>%
+  group_by(Country) %>%
+  mutate(ord=1:n(),
+         total=max(Deaths),
+         n=n()) %>%
+    ungroup()
+
+crn3<- crn %>%  
+  filter(!Country %in% c("Others")) %>%
+  group_by(Country) %>%
+  mutate(death_rate=(Deaths*100/Infected) %>% round(digits = 1)) %>%
+  filter(row_number()==n()&Deaths>1) %>% ungroup() %>% 
+arrange(Infected %>% desc())
+
+  
+crn_theme<-
+  theme_minimal() +
+  theme(
+  legend.title = element_blank(),
+  legend.text = element_text(size = 14),
+  legend.key.size = unit(0.8, "cm"),
+  legend.key.width = unit(2,"cm"),
+  #legend.position="top",
+  plot.margin=unit(c(0.5,0.5,0.5,0.5),"cm"),
+  axis.title.x = element_text(size=14,colour = "grey30",margin = margin(t = 15)),
+  axis.title.y = element_text(size=14,colour = "grey30",margin = margin(r = 15)),
+  axis.text.x = element_text(size=11,colour = "grey40"),
+  axis.text.y = element_text(size=11,colour = "grey40"),
+  plot.title = element_text(size=18,colour = "grey5"),
+  plot.subtitle = element_text(size=13,colour = "grey45")
+  )  
+
+
+```
+
+
+```{r include=FALSE}
+
+crn_new_death <- function(data, min, max=1000000, nn=10, span=0.45, brk=50, plt="Set1", direction=1){
+
+subtitle<-ifelse(max==1000000,paste("Країни з загальною кількістю померлих більше",min,"випадків"),
+                 paste("Країни з загальною кількістю померлих від",min,"до",max,"випадків"))
+
+                 
+plot<-ggplot(data %>% filter(between(total,min,max)&n>nn), aes(x=ord,y=Deaths_new,color = Country)) +
+  geom_point(size=1.5,alpha = 0.5) +
+  geom_smooth(method = "loess", se=F,size=1.5, span = span) +
+  #stat_smooth(aes(y=Deaths_new, x=ord), formula = y ~ s(x, k = 5), method ="gam", se = FALSE,size=1.5) +
+  #stat_smooth(aes(y=Deaths_new, x=ord), method = "lm",formula = y ~ poly(x, 5), se = FALSE,size=1.5) +
+
+  scale_x_continuous(breaks = seq(5, 60, 5)) +
+  scale_y_continuous(breaks = seq(0, 7000, brk)
+                     ,limits = c(-5,max(data[between(data$total,min,max),c("Deaths_new")])+1*brk)
+                     #,limits = c(-5,3000)
+                     ) +
+  #scale_linetype_discrete() +
+  #scale_linetype_identity() +
+  #scale_linetype_manual(values=sample(c(1,2), nrow(x),replace = T))+
+  labs(y="Кількість нових смертей за день", x = paste0("Кількість днів починаючи від ",start_d," смертей"),
+       title = "Кількість нових смертей від COVID-19 в день", 
+       subtitle = subtitle
+       ) +   
+  crn_theme +   scale_color_brewer(palette = plt,direction = direction) +
+  theme(plot.title = element_text(colour = "red3"))
+
+return(plot)
+}
+
+
+
+crn_new_inf <- function(data, min, max=1000000, nn=10, span=0.45, brk=50, plt="Set1", direction=1){
+
+subtitle<-ifelse(max==1000000,paste("Країни з загальною кількістю випадків COVID-19 більше",min,"випадків"),
+                 paste("Країни з загальною кількістю випадків COVID-19 від",min,"до",max,"випадків"))
+
+                 
+plot<-ggplot(data %>% filter(between(total,min,max)&n>nn), aes(x=ord,y=Infected_new,color = Country)) +
+  geom_point(size=1.5,alpha = 0.5) +
+  geom_smooth(method = "loess", se=F,size=1.5, span = span) +
+  #stat_smooth(aes(y=Deaths_new, x=ord), formula = y ~ s(x, k = 5), method ="gam", se = FALSE,size=1.5) +
+  #stat_smooth(aes(y=Deaths_new, x=ord), method = "lm",formula = y ~ poly(x, 5), se = FALSE,size=1.5) +
+
+  scale_x_continuous(breaks = seq(5, 100, 5)) +
+  scale_y_continuous(breaks = seq(0, 100000, brk)
+                     ,limits = c(-5,max(data[between(data$total,min,max),c("Infected_new")])+1*brk)
+                     #,limits = c(-5,3000)
+                     ) +
+  #scale_linetype_discrete() +
+  #scale_linetype_identity() +
+  #scale_linetype_manual(values=sample(c(1,2), nrow(x),replace = T))+
+  labs(y="Кількість нових випадків COVID-19 за день", x = paste0("Кількість днів починаючи від ",start_d," смертей"),
+       title = "Кількість нових випадків в день", 
+       subtitle = subtitle
+       ) +   
+  crn_theme +   scale_color_brewer(palette = plt,direction = direction) +
+  theme(plot.title = element_text(colour = "red3"))
+
+return(plot)
+}
+
+
+
+crn_total_death <- function(data, min, max=1000000, nn=10, brk=2000, plt="Set1", direction=1){
+
+subtitle<-ifelse(max==1000000,paste("Країни з загальною кількістю померлих більше",min,"випадків"),
+                 paste("Країни із загальною кількістю померлих від",min,"до",max,"випадків"))
+
+                   
+plot<-ggplot(data %>% filter(between(total,min,max)&n>nn), aes(x=ord,y=Deaths)) +
+  geom_line(aes(color = Country, #linetype = Country
+                ),size=1.5) +
+  scale_x_continuous(breaks = seq(5, 60, 5)) +
+  scale_y_continuous(breaks = seq(0,  300000, brk)) +
+  #scale_y_continuous(breaks = seq(0, 20000, 1000)) +
+  #scale_linetype_discrete() +
+  #scale_linetype_identity() +
+  #scale_linetype_manual(values=sample(c(1,2), nrow(x),replace = T))+
+  labs(y="Загальна кількість померлих", x = paste0("Кількість днів починаючи від ",start_d," смертей"),
+       title = "Загальна кількість смертей від COVID-19 в різних країнах", 
+       subtitle = paste("Країни з загальною кількістю померлих більше",min,"випадків")
+       #, caption = "My caption"
+       )+
+  crn_theme +   scale_color_brewer(palette = plt,direction = direction)+
+  theme(plot.title = element_text(colour = "royalblue3"))
+
+return(plot)
+}
+
+
+crn_total_death_pc <- function(data, min_pc=50,min=1000, max=1000000, nn=10, brk=100, plt="Paired", direction=1){
+
+subtitle<-ifelse(max==1000000,paste("Країни з загальною кількістю померлих більше",min,"випадків"),
+                 paste("Країни із загальною кількістю померлих від",min,"до",max,"випадків"))
+
+                   
+plot<-ggplot(data %>% filter((between(total,min,max)&total*1000000/popData2018>min_pc)&n>nn), aes(x=ord,y=Deaths_pc)) +
+  geom_line(aes(color = Country, linetype = Country
+                ),size=1.5) +
+  scale_x_continuous(breaks = seq(5, 100, 5)) +
+  scale_y_continuous(breaks = seq(0, max+brk, brk)) +
+  #scale_y_continuous(breaks = seq(0, 20000, 1000)) +
+  #scale_linetype_discrete() +
+  #scale_linetype_identity() +
+  scale_linetype_manual(values=sample(c(1,2), nrow(data),replace = T))+
+  labs(y="Кількість померлих на 1 млн. населення", x = paste0("Кількість днів починаючи від ",start_d," смертей"),
+       title = "Загальна кількість смертей від COVID-19 в різних країнах (на 1 млн населення)", 
+       subtitle = subtitle
+       #, caption = "My caption"
+       )+
+  crn_theme +   scale_color_brewer(palette = plt,direction = direction) +
+  theme(plot.title = element_text(colour = "royalblue3"))
+
+return(plot)
+}
+
+
+
+
+crn_total_death_linetype <- function(data, min, max=1000000, nn=5, brk=100, plt="Paired", direction=1, italy=TRUE,europe=FALSE){
+
+if (italy) {
+  if (europe) 
+    {
+    x<-data %>% filter((between(total,min,max)&n>nn&europe)|(Country=="Italy"&Deaths<max))
+    subtitle <- paste("Європейські країни з загальною кількістю померлих від",min,"до" ,max,"випадків + Італія для порівняння")
+      } 
+  else 
+    {
+      subtitle <- paste("Країни з загальною кількістю померлих від",min,"до" ,max,"випадків + Італія для порівняння")
+      x<-data %>% filter((between(total,min,max)&n>nn)|(Country=="Italy"&Deaths<(max+brk)))
+    }
+
+} else {
+    if (europe) {x<-data %>% filter(between(total,min,max)&n>nn&europe)
+    subtitle <- paste("Європейські країни з загальною кількістю померлих від",min,"до" ,max,"випадків")
+    } else {
+    x<-data %>% filter(between(total,min,max)&n>nn)
+          subtitle <- paste("Країни з загальною кількістю померлих від",min,"до" ,max,"випадків")
+    
+  }
+}
+
+
+plot<-ggplot(x, aes(x=ord,y=Deaths)) +
+  geom_line(aes(color = Country, linetype = Country
+                ),size=1.5) +
+  scale_x_continuous(breaks = seq(5, 60, 5)) +
+  scale_y_continuous(breaks = seq(0, max+brk, brk)) +
+  #scale_y_continuous(breaks = seq(0, 20000, 1000)) +
+  #scale_linetype_discrete() +
+  #scale_linetype_identity() +
+  scale_linetype_manual(values=sample(c(1,2), nrow(x),replace = T))+
+  labs(y="Загальна кількість померлих", x = paste0("Кількість днів починаючи від ",start_d," смертей"),
+       title = "Загальна кількість смертей від COVID-19 в різних країнах", 
+       subtitle = subtitle
+       #, caption = "My caption"
+       )+
+  crn_theme +   scale_color_brewer(palette = plt,direction = direction) +
+  theme(plot.title = element_text(colour = "royalblue3"))
+
+return(plot)
+}
+
+
+```
+
+Джерело даних - [European Centre for Disease Prevention and Control](https://www.ecdc.europa.eu/en/publications-data/download-todays-data-geographic-distribution-covid-19-cases-worldwide).
+
+**Дані на `r day(Sys.Date()-1)` квітня**
+
+</br>
+ 
+```{r include=FALSE}
+
+total_death_min1<-5000
+total_death_min1pc<-2000
+total_death_min2<-1000
+total_death_min3<-800
+total_death_min4<-500
+total_death_min5<-100
+
+```
+
+
+
+</br>
+
+# Динаміка кількості нових смертей за день
+### Країни із загальною кількістю смертей більше `r total_death_min1`
+
+</br>
+
+```{r echo=FALSE, fig.height=6, fig.width=10}
+
+plot4new<-crn_new_death(crn2 %>% filter(!(Country=="US"&date %in% as.Date(c("2020-04-15","2020-04-17")))),min=total_death_min1,brk=200,direction = 0,plt = "Set1", span = 0.5)
+#plot4new
+ggplotly(plot4new+ggtitle(""))
+```
+
+
+
+</br>
+
+### Країни із загальною кількістю смертей від `r total_death_min2` до  `r total_death_min1`
+
+</br>
+
+
+```{r echo=FALSE, fig.height=6, fig.width=10}
+
+plot4new2<-crn_new_death(crn2,min=total_death_min2, max=total_death_min1, brk=50, direction = 0, plt = "Set1", n=5, span = 0.55)
+# plot4new2
+
+ggplotly(plot4new2+ggtitle(""))
+```
+
+</br>
+</br>
+
+# Динаміка загальної кількості смертей  
+</br>
+
+### Країни з кількістю смертей більше `r total_death_min1`
+
+</br>
+
+```{r echo=FALSE, fig.height=6, fig.width=10}
+plot4<-crn_total_death(crn2,min = total_death_min1,brk = 5000)
+#plot4
+
+ggplotly(plot4+ggtitle(""))
+```
+
+
+
+
+</br>
+
+### Країни з кількістю смертей від `r total_death_min2` до `r total_death_min1` + Італія додана для порівняння
+</br>
+
+
+```{r echo=FALSE, fig.height=6, fig.width=10}
+
+plot4small<-crn_total_death_linetype(crn2,min=total_death_min3,max=total_death_min1, brk=500,
+                                     plt="Set1")
+#plot4small
+ggplotly(plot4small+ggtitle(""))
+```
+
+
+
+</br>
+
+### Європейські країни з кількістю смертей від `r total_death_min5` до `r total_death_min3` + Італія додана для порівняння
+</br>
+
+
+```{r echo=FALSE, fig.height=6, fig.width=10}
+
+plot4small3<-crn_total_death_linetype(crn2,min=total_death_min5,max=total_death_min3, brk=50,
+                                     plt="Paired",europe = TRUE,direction = 1)
+#plot4small3
+
+
+ggplotly(plot4small3+ggtitle(""))
+```
+
+
+
+```{r echo=FALSE}
+total_death_min1pc<-1200
+
+
+```
+
+# Динаміка загальної кількості смертей на 1 млн. населення
+</br>
+
+### Країни з кількістю смертей більше `r total_death_min1`
+
+</br>
+
+```{r echo=FALSE, fig.height=6, fig.width=10}
+plot4pc<-crn_total_death_pc(crn2,min = total_death_min1pc,min_pc=30,brk = 50)
+#plot4
+
+ggplotly(plot4pc+ggtitle(""))
+```
+
+
+</br>
+</br>
+
+# Рівень смертності в різних країнах 
+
+</br>
+
+```{r echo=FALSE, fig.height=6, fig.width=10, dpi = 200}
+deth_min<-60
+inf_min<-4000
+y<-crn3 %>% filter(Infected>inf_min) %>% 
+  mutate(hjust=ifelse(Country %in% c("Germany","China"),-0.7,0.5),
+         vjust=ifelse(Country %in% c("Germany","China"),0.3,-2),
+         hjust=ifelse(Country %in% c("US","Switzerland","Germany","Iran","Turkey","Canada"),0.5,hjust),
+         vjust=ifelse(Country %in% c("US","Switzerland","Germany","Iran","Turkey","Canada"),1.5,vjust),
+         )
+
+
+scale<-40000
+plot5<-ggplot(y)  + 
+    #geom_bar(aes(x=Country, y=Infected),stat="identity", fill="tan1", colour="sienna3")+
+  geom_col(aes(x=reorder(Country,-Infected), y=Infected),fill="indianred2")+
+  geom_line(aes(x=reorder(Country,-Infected), y=death_rate*scale), color="steelblue4", group = 1, size = 1.5) + 
+  geom_point(aes(x=reorder(Country,-Infected), y=death_rate*scale), color="steelblue4", size = 3) +
+  geom_text(aes(label=death_rate, x=Country, y=death_rate*scale), colour="steelblue4",vjust =  y$vjust, hjust=y$hjust,size = 3.1)+
+    #geom_text(aes(label=Response, x=Year, y=0.95*Response), colour="black")+
+    scale_y_continuous(
+      #limits = c(0, 3000000),
+      breaks = seq(0, 800000, 50000),
+      sec.axis = sec_axis(~./scale, breaks = seq(0, 30, 1), name = "Смертність, %"),
+      expand = c(0,0),
+      labels = scales::comma#,trans='log'
+      ) +
+    labs(y="Кількість заражених", x = "",
+       title = "Смертність від COVID-19 в різних країнах", 
+       subtitle = paste("Країни з кількістю заражених більше",inf_min)
+       ) + crn_theme +
+  theme(plot.margin=unit(c(0.5,0.5,0.1,0.1),"cm"),
+        axis.text.x = element_text(angle = 90, hjust = 1,  vjust = 0.3, size = 13,colour = "grey5"),
+        axis.text.y = element_text(size = 8),
+        axis.title.x = element_text(size=14,margin = margin(t = 15)),
+        axis.title.y = element_text(size=14,colour = "grey35",margin = margin(r = 10,l=10,b=10)))
+
+  
+
+plot5
+
+```
+
+
+
+
+```{r fig.height=6, fig.width=10, include=FALSE}
+min_lim1<-20000
+#crn1 %>% filter(total>min_lim&!duplicated(Country)) %>% nrow()
+  
+plot1.1<-ggplot(crn1 %>% filter(total>min_lim1), aes(x=ord,y=Infected)) +
+  geom_line(aes(color = Country, linetype = Country
+                ),size=1.5) +
+  scale_x_continuous(breaks = seq(0, 100, 5)
+                     ) +
+  scale_y_continuous(breaks = seq(0, 1000000, 50000),expand = c(0.02,0)) +
+  scale_linetype_manual(values=sample(c(1,2),crn1 %>% filter(total>min_lim1&!duplicated(Country)) %>% nrow(),replace = T))+
+  #scale_linetype_discrete() +
+  #scale_linetype_identity() +
+  labs(y="Кількість заражених", x = paste0("День з умовного початку епідемії (",start_i," випадків)"),
+       title = "Поширення епідемії COVID-19 в різних країнах", 
+       subtitle = paste("Країни з кількістю заражених більше",min_lim1,"випадків")
+       #, caption = "My caption"
+       )+
+  crn_theme +   scale_color_brewer(palette = "Paired",direction=-1)
+
+plot1.1
+
+```
+
+</br>
+</br>
+
+# Динаміка кількості нових випадків COVID-19 
+</br>
+### Країни із загальною кількістю смертей більше 10000
+
+</br>
+
+
+```{r echo=FALSE, fig.height=6, fig.width=10}
+
+plot4new_cases<-crn_new_inf(crn1,min=40000,brk=5000,direction = 0,plt = "Set1", span = 0.5)
+#plot4new
+ggplotly(plot4new+ggtitle(""))
+```
+
+
+
+# Динаміка загальної кількості випадків COVID-19 
+</br>
+
+### Країни з кількістю  більше `r as.character(min_lim1)` випадків
+</br>
+
+```{r fig.height=6, fig.width=10, echo=FALSE}
+ggplotly(plot1.1+ggtitle("")) 
+```
+
+
+```{r include=FALSE, fig.height=6, fig.width=10}
+max_lim2<-20000
+min_lim2<-8000
+
+plot1.2<-ggplot(crn1 %>% filter((between(total,min_lim2,max_lim2)&n>8)#|(Country=="Spain"&ord<16)
+                              ), aes(x=ord,y=Infected)) +
+  geom_line(aes(color = Country, linetype = Country),size=1.5) +
+  scale_x_continuous(breaks = seq(0, 100, 5)) +
+  scale_y_continuous(breaks = seq(0, max_lim2, 1000),limits = c(1, max_lim2),expand = c(0.02,0)) +
+  labs(y="Кількість заражених", x = paste0("День з умовного початку епідемії (",start_i," випадків)"),
+       title = "Поширення епідемії COVID-19 в різних країнах", 
+       subtitle = paste("Країни з кількістю заражених від ",min_lim2, "до",max_lim2,"випадків")
+       #, caption = "My caption"
+       )+
+  crn_theme +
+  scale_color_brewer(palette = "Paired")
+
+plot1.2
+
+```
+
+</br>
+</br>
+
+### Країни з кількістю випадків від `r min_lim2` до `r as.character(max_lim2)`
+
+</br>
+
+```{r echo=FALSE, fig.height=6, fig.width=10}
+ggplotly(plot1.2+ggtitle(""))
+```
+
+
+
+```{r include=FALSE, fig.height=6, fig.width=10}
+max_lim3<-8000
+min_lim3<-1400
+
+plot1.3<-ggplot(crn1 %>% filter((between(total,min_lim3,max_lim3)&n>8&europe)#|(Country=="Spain"&ord<16)
+                              ), aes(x=ord,y=Infected)) +
+  geom_line(aes(color = Country, linetype = Country),size=1.5) +
+  scale_x_continuous(breaks = seq(0, 100, 5)) +
+  scale_y_continuous(breaks = seq(0, max_lim3, 500),limits = c(1, max_lim3),expand = c(0.02,0)) +
+  labs(y="Кількість заражених", x = paste0("День з умовного початку епідемії (",start_i," випадків)"),
+       title = "Поширення епідемії COVID-19 в різних країнах", 
+       subtitle = paste("Країни з кількістю заражених від ",min_lim3, "до",max_lim3,"випадків")
+       #, caption = "My caption"
+       )+
+  crn_theme +
+  scale_color_brewer(palette = "Paired")
+
+plot1.3
+
+```
+
+</br>
+</br>
+
+### Європейські Країни з кількістю випадків від `r min_lim3` до `r max_lim3`
+
+</br>
+
+```{r echo=FALSE, fig.height=6, fig.width=10}
+ggplotly(plot1.3+ggtitle(""))
+```
+
+
+
+```{r eval=FALSE, fig.height=6, fig.width=10, include=FALSE}
+
+plot6<-ggplot(crn1 %>% filter(Country %in% c("Taiwan","Singapore","Japan","South Korea")), aes(x=ord,y=Deaths)) +
+  geom_line(aes(color = Country, linetype = Country),size=1.5) +
+  scale_x_continuous(breaks = seq(0, 60, 1)) +
+  scale_y_continuous(breaks = seq(0, 1000, 20),expand = c(0.02,0)) +
+  labs(y="Кількість заражених", x = paste0("День з умовного початку епідемії (",start_i," випадків)"),
+       title = "Поширення COVID-19 в різних країнах", 
+       subtitle = paste("Японія, Сингапур, Тайвань")
+       #, caption = "My caption"
+       )+
+  crn_theme +
+  scale_color_brewer(palette = "Paired")
+
+plot6
+
+```
+
+```{r include=FALSE}
+ggsave('D:\\My documents\\!GoogleDrive\\Public\\covid-19\\deaths_countries.png',plot=plot5,
+       dpi=200, height = 6,width = 10,units = "in")
+
+ggsave('D:\\My documents\\!GoogleDrive\\Public\\covid-19\\death_trend.png',plot=plot4,
+       dpi=300, height = 6,width = 10,units = "in")
+
+ggsave('D:\\My documents\\!GoogleDrive\\Public\\covid-19\\death_trend_small.png',plot=plot4small,
+       dpi=300, height = 6,width = 10,units = "in")
+
+
+ggsave('D:\\My documents\\!GoogleDrive\\Public\\covid-19\\death_trend_small3.png',plot=plot4small3,
+       dpi=300, height = 6,width = 10,units = "in")
+
+ggsave('D:\\My documents\\!GoogleDrive\\Public\\covid-19\\death_new.png',plot=plot4new,
+       dpi=300, height = 6,width = 10,units = "in")
+
+
+ggsave('D:\\My documents\\!GoogleDrive\\Public\\covid-19\\death_new2.png',plot=plot4new2,
+       dpi=300, height = 6,width = 10,units = "in")
+
+ggsave('D:\\My documents\\!GoogleDrive\\Public\\covid-19\\death_pc.png',plot=plot4pc,
+       dpi=300, height = 6,width = 10,units = "in")
+
+
+```
+
